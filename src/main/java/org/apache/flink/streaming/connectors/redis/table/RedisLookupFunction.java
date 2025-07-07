@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.redis.table;
 
+import io.lettuce.core.RedisFuture;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.shaded.guava31.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava31.com.google.common.cache.CacheBuilder;
@@ -33,22 +34,23 @@ import org.apache.flink.streaming.connectors.redis.container.RedisCommandsContai
 import org.apache.flink.streaming.connectors.redis.container.RedisCommandsContainerBuilder;
 import org.apache.flink.streaming.connectors.redis.mapper.RedisMapper;
 import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.AsyncTableFunction;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.DoubleType;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
+import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import static org.apache.flink.streaming.connectors.redis.table.RedisDynamicTableFactory.CACHE_SEPARATOR;
 
@@ -94,6 +96,20 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
         this.redisCommand = redisCommandDescription.getRedisCommand();
 
         this.dataTypes = resolvedSchema.getColumnDataTypes();
+        // todo
+        boolean hasArrayType = false;
+        for (DataType dataType : this.dataTypes) {
+            if (dataType.getChildren().isEmpty()) continue;
+            hasArrayType = true;
+            if (!RedisValueDataStructure.row.equals(this.redisValueDataStructure)
+                    || dataType.getChildren().size() != 1
+                    || !LogicalTypeRoot.VARCHAR.equals(dataType.getChildren().get(0).getLogicalType().getTypeRoot())) {
+                throw new FlinkRuntimeException("Constructured Data Type only support Array<String> and `value.data.structure` must be row! eg: `create table dim_redis ( data Array<String> ) with ( ... )`");
+            }
+        }
+        if (hasArrayType && this.dataTypes.size() > 1) {
+            throw new FlinkRuntimeException("Array only working with single field! eg: `create table dim_redis ( data Array<String> ) with ( ... )`");
+        }
     }
 
     public void eval(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys)
@@ -104,7 +120,7 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
             GenericRowData genericRowData = null;
             switch (redisCommand.getJoinCommand()) {
                 case GET:
-                    genericRowData = (GenericRowData) cache.getIfPresent(String.valueOf(keys[0]));
+                    genericRowData = (GenericRowData) cache.getIfPresent(buildCacheKey(keys[0]));
                     break;
                 case HGET:
                     if (loadAll) {
@@ -172,22 +188,51 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
     private void query(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) {
         switch (redisCommand.getJoinCommand()) {
             case GET: {
-                this.redisCommandsContainer
-                        .get(String.valueOf(keys[0]))
-                        .thenAccept(
-                                result -> {
-                                    GenericRowData rowData =
-                                            RedisResultWrapper.createRowDataForString(
-                                                    keys,
-                                                    result,
-                                                    redisValueDataStructure,
-                                                    dataTypes);
-                                    resultFuture.complete(Collections.singleton(rowData));
-                                    if (cache != null && result != null) {
-                                        cache.put(String.valueOf(keys[0]), rowData);
-                                    }
-                                });
+                if (keys[0] instanceof ArrayData arrayData) {
+                    List<CompletableFuture<String>> futures = IntStream.range(0, arrayData.size())
+                            .boxed()
+                            .map(i -> String.valueOf(arrayData.getString(i)))
+                            .map(k -> this.redisCommandsContainer.get(k)).map(RedisFuture::toCompletableFuture).toList();
 
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                            .thenAccept(v -> {
+                                List<String> results = new ArrayList<>();
+                                boolean allNull = true;
+                                for (CompletableFuture<String> future : futures) {
+                                    String result = future.join();
+                                    results.add(result);
+                                    if (result != null) {
+                                        allNull = false;
+                                    }
+                                }
+                                GenericRowData rowData =
+                                        RedisResultWrapper.createRowDataForArray(
+                                                keys,
+                                                results,
+                                                redisValueDataStructure,
+                                                dataTypes);
+                                resultFuture.complete(Collections.singleton(rowData));
+                                if (cache != null && !allNull) {
+                                    cache.put(buildCacheKey(arrayData), rowData);
+                                }
+                            });
+                } else {
+                    this.redisCommandsContainer
+                            .get(String.valueOf(keys[0]))
+                            .thenAccept(
+                                    result -> {
+                                        GenericRowData rowData =
+                                                RedisResultWrapper.createRowDataForString(
+                                                        keys,
+                                                        result,
+                                                        redisValueDataStructure,
+                                                        dataTypes);
+                                        resultFuture.complete(Collections.singleton(rowData));
+                                        if (cache != null && result != null) {
+                                            cache.put(String.valueOf(keys[0]), rowData);
+                                        }
+                                    });
+                }
                 break;
             }
             case HGET: {
@@ -237,6 +282,17 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
             }
             default:
         }
+    }
+
+    private String buildCacheKey(Object obj) {
+        if (obj instanceof ArrayData array) {
+            StringJoiner joiner = new StringJoiner(";");
+            for (int i = 0; i < array.size(); i++) {
+                joiner.add(String.valueOf(array.getString(i)));
+            }
+            return joiner.toString();
+        }
+        return String.valueOf(obj);
     }
 
     /**
