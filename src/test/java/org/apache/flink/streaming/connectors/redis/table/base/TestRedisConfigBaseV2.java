@@ -93,7 +93,7 @@ public class TestRedisConfigBaseV2 {
         redisClient = RedisClient.create(redisURI);
         singleConnect = redisClient.connect();
         singleRedisCommands = singleConnect.sync();
-        LOG.info("connect to the redis: {}", redisURI);
+        LOG.info("connect to the redis: {}, epoll: {}", redisURI, io.netty.channel.epoll.Epoll.isAvailable());
     }
 
     @AfterAll
