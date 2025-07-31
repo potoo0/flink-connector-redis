@@ -44,7 +44,7 @@ public class RedisClusterContainer implements RedisCommandsContainer, Closeable 
     protected transient RedisClusterClient redisClusterClient;
 
     protected transient StatefulRedisClusterConnection<String, String> connection;
-    protected transient RedisAdvancedClusterAsyncCommands clusterAsyncCommands;
+    protected transient RedisAdvancedClusterAsyncCommands<String, String> clusterAsyncCommands;
 
     /**
      * Initialize Redis command container for Redis cluster.
@@ -87,7 +87,7 @@ public class RedisClusterContainer implements RedisCommandsContainer, Closeable 
     }
 
     @Override
-    public RedisFuture<Boolean> hmset(final String key, final Map hashField) {
+    public RedisFuture<String> hmset(final String key, final Map<String, String> hashField) {
         try {
             return clusterAsyncCommands.hmset(key, hashField);
         } catch (Exception e) {
@@ -473,7 +473,7 @@ public class RedisClusterContainer implements RedisCommandsContainer, Closeable 
     }
 
     @Override
-    public RedisClusterAsyncCommands getAsyncCommands() {
+    public RedisClusterAsyncCommands<String, String> getAsyncCommands() {
         return clusterAsyncCommands;
     }
 
@@ -493,7 +493,7 @@ public class RedisClusterContainer implements RedisCommandsContainer, Closeable 
     }
 
     @Override
-    public RedisFuture<List> lRange(String key, long start, long end) {
+    public RedisFuture<List<String>> lRange(String key, long start, long end) {
         try {
             return clusterAsyncCommands.lrange(key, start, end);
         } catch (Exception e) {
@@ -571,7 +571,7 @@ public class RedisClusterContainer implements RedisCommandsContainer, Closeable 
     }
 
     @Override
-    public RedisFuture<List> zrange(String key, long start, long stop) {
+    public RedisFuture<List<String>> zrange(String key, long start, long stop) {
         try {
             return clusterAsyncCommands.zrange(key, start, stop);
         } catch (Exception e) {
@@ -588,13 +588,13 @@ public class RedisClusterContainer implements RedisCommandsContainer, Closeable 
     }
 
     @Override
-    public RedisFuture<List> srandmember(String key, long count) {
+    public RedisFuture<List<String>> srandmember(String key, long count) {
         try {
             return clusterAsyncCommands.srandmember(key, count);
         } catch (Exception e) {
             if (LOG.isErrorEnabled()) {
                 LOG.error(
-                        "Cannot send Redis message with command srandmember to key {} count {}error message {}",
+                        "Cannot send Redis message with command srandmember to key {} count {} error message {}",
                         key,
                         count,
                         e.getMessage());

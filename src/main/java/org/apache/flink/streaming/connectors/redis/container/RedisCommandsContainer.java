@@ -56,7 +56,7 @@ public interface RedisCommandsContainer extends Serializable {
      * @param hashField
      * @return
      */
-    RedisFuture<Boolean> hmset(String key, Map hashField);
+    RedisFuture<String> hmset(String key, Map<String, String> hashField);
 
     /**
      * @param key
@@ -145,7 +145,7 @@ public interface RedisCommandsContainer extends Serializable {
      * @param score
      * @param element
      */
-    RedisFuture zincrBy(String key, double score, String element);
+    RedisFuture<Double> zincrBy(String key, double score, String element);
 
     /**
      * Removes the specified member from the sorted set stored at key.
@@ -283,7 +283,7 @@ public interface RedisCommandsContainer extends Serializable {
      * @param end
      * @return
      */
-    RedisFuture<List> lRange(String key, long start, long end);
+    RedisFuture<List<String>> lRange(String key, long start, long end);
 
     /**
      * @param key
@@ -317,19 +317,19 @@ public interface RedisCommandsContainer extends Serializable {
      * @param stop
      * @return
      */
-    RedisFuture<List> zrange(String key, long start, long stop);
+    RedisFuture<List<String>> zrange(String key, long start, long stop);
 
     /**
      * @param key
      * @param count
      * @return
      */
-    public RedisFuture<List> srandmember(String key, long count);
+    RedisFuture<List<String>> srandmember(String key, long count);
 
     /**
      * get redis async commands.
      *
      * @return
      */
-    RedisClusterAsyncCommands getAsyncCommands();
+    RedisClusterAsyncCommands<String, String> getAsyncCommands();
 }

@@ -44,7 +44,7 @@ public class RedisContainer implements RedisCommandsContainer, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(RedisContainer.class);
     private final transient RedisClient redisClient;
     protected transient StatefulRedisConnection<String, String> connection;
-    protected transient RedisAsyncCommands asyncCommands;
+    protected transient RedisAsyncCommands<String, String> asyncCommands;
 
     /**
      * Use this constructor if to connect with single Redis server.
@@ -86,7 +86,7 @@ public class RedisContainer implements RedisCommandsContainer, Closeable {
     }
 
     @Override
-    public RedisFuture<Boolean> hmset(final String key, final Map hashField) {
+    public RedisFuture<String> hmset(final String key, final Map<String, String> hashField) {
         try {
             return asyncCommands.hmset(key, hashField);
         } catch (Exception e) {
@@ -474,7 +474,7 @@ public class RedisContainer implements RedisCommandsContainer, Closeable {
     }
 
     @Override
-    public RedisClusterAsyncCommands getAsyncCommands() {
+    public RedisClusterAsyncCommands<String, String> getAsyncCommands() {
         return asyncCommands;
     }
 
@@ -494,7 +494,7 @@ public class RedisContainer implements RedisCommandsContainer, Closeable {
     }
 
     @Override
-    public RedisFuture<List> lRange(String key, long start, long end) {
+    public RedisFuture<List<String>> lRange(String key, long start, long end) {
         try {
             return asyncCommands.lrange(key, start, end);
         } catch (Exception e) {
@@ -573,7 +573,7 @@ public class RedisContainer implements RedisCommandsContainer, Closeable {
     }
 
     @Override
-    public RedisFuture<List> zrange(String key, long start, long stop) {
+    public RedisFuture<List<String>> zrange(String key, long start, long stop) {
         try {
             return asyncCommands.zrange(key, start, stop);
         } catch (Exception e) {
@@ -590,7 +590,7 @@ public class RedisContainer implements RedisCommandsContainer, Closeable {
     }
 
     @Override
-    public RedisFuture<List> srandmember(String key, long count) {
+    public RedisFuture<List<String>> srandmember(String key, long count) {
         try {
             return asyncCommands.srandmember(key, count);
         } catch (Exception e) {

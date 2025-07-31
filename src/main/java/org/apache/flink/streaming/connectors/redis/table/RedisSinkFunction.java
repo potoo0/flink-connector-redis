@@ -151,7 +151,7 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
     private void startSink(String[] params, RowKind kind) throws Exception {
         for (int i = 0; i <= maxRetryTimes; i++) {
             try {
-                RedisFuture redisFuture = null;
+                RedisFuture<?> redisFuture = null;
                 if (kind == RowKind.DELETE) {
                     redisFuture = rowKindDelete(params);
                 } else {
@@ -180,8 +180,8 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
      *
      * @param params
      */
-    private RedisFuture sink(String[] params) {
-        RedisFuture redisFuture = null;
+    private RedisFuture<?> sink(String[] params) {
+        RedisFuture<?> redisFuture = null;
         switch (redisCommand.getInsertCommand()) {
             case RPUSH:
                 redisFuture = this.redisCommandsContainer.rpush(params[0], params[1]);
@@ -249,7 +249,7 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
             case ZINCRBY:
                 redisFuture =
                         this.redisCommandsContainer.zincrBy(
-                                params[0], Double.valueOf(params[1]), params[2]);
+                                params[0], Double.parseDouble(params[1]), params[2]);
                 break;
             case ZREM:
                 redisFuture = this.redisCommandsContainer.zrem(params[0], params[1]);
@@ -303,21 +303,21 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
             case HINCRBY:
                 redisFuture =
                         this.redisCommandsContainer.hincrBy(
-                                params[0], params[1], Long.valueOf(params[2]));
+                                params[0], params[1], Long.parseLong(params[2]));
                 break;
             case HINCRBYFLOAT:
                 redisFuture =
                         this.redisCommandsContainer.hincrByFloat(
-                                params[0], params[1], Double.valueOf(params[2]));
+                                params[0], params[1], Double.parseDouble(params[2]));
                 break;
             case INCRBY:
                 redisFuture =
-                        this.redisCommandsContainer.incrBy(params[0], Long.valueOf(params[1]));
+                        this.redisCommandsContainer.incrBy(params[0], Long.parseLong(params[1]));
                 break;
             case INCRBYFLOAT:
                 redisFuture =
                         this.redisCommandsContainer.incrByFloat(
-                                params[0], Double.valueOf(params[1]));
+                                params[0], Double.parseDouble(params[1]));
                 break;
             case DECRBY:
                 redisFuture =
@@ -341,8 +341,8 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
      *
      * @param params
      */
-    private RedisFuture rowKindDelete(String[] params) {
-        RedisFuture redisFuture = null;
+    private RedisFuture<?> rowKindDelete(String[] params) {
+        RedisFuture<?> redisFuture = null;
         switch (redisCommand.getDeleteCommand()) {
             case SREM:
                 redisFuture = this.redisCommandsContainer.srem(params[0], params[1]);
@@ -354,7 +354,7 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
                 redisFuture = this.redisCommandsContainer.zrem(params[0], params[2]);
                 break;
             case ZINCRBY:
-                Double d = -Double.valueOf(params[1]);
+                double d = -Double.parseDouble(params[1]);
                 redisFuture = this.redisCommandsContainer.zincrBy(params[0], d, params[2]);
                 break;
             case HDEL:
@@ -365,21 +365,21 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
             case HINCRBY:
                 redisFuture =
                         this.redisCommandsContainer.hincrBy(
-                                params[0], params[1], -Long.valueOf(params[2]));
+                                params[0], params[1], -Long.parseLong(params[2]));
                 break;
             case HINCRBYFLOAT:
                 redisFuture =
                         this.redisCommandsContainer.hincrByFloat(
-                                params[0], params[1], -Double.valueOf(params[2]));
+                                params[0], params[1], -Double.parseDouble(params[2]));
                 break;
             case INCRBY:
                 redisFuture =
-                        this.redisCommandsContainer.incrBy(params[0], -Long.valueOf(params[1]));
+                        this.redisCommandsContainer.incrBy(params[0], -Long.parseLong(params[1]));
                 break;
             case INCRBYFLOAT:
                 redisFuture =
                         this.redisCommandsContainer.incrByFloat(
-                                params[0], -Double.valueOf(params[1]));
+                                params[0], -Double.parseDouble(params[1]));
                 break;
         }
         return redisFuture;
@@ -424,8 +424,6 @@ public class RedisSinkFunction<IN> extends RichSinkFunction<IN> {
                                                     : 86400 + expireTimeSeconds - now);
                                 }
                             });
-        } else if (ttl != null) {
-            this.redisCommandsContainer.expire(key, ttl);
         }
     }
 
