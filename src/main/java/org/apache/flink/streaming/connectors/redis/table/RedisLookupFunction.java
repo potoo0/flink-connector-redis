@@ -47,10 +47,10 @@ import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.IntStream;
 
 import static org.apache.flink.streaming.connectors.redis.table.RedisDynamicTableFactory.CACHE_SEPARATOR;
 
@@ -71,11 +71,13 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
     private final List<DataType> dataTypes;
     private final boolean loadAll;
     private final RedisValueDataStructure redisValueDataStructure;
+    /// directly store redis command output.
     private Cache<String, Object> cache;
+    private RedisJoinCommandExecutor joinCommandExecutor;
 
     public RedisLookupFunction(
             FlinkConfigBase flinkConfigBase,
-            RedisMapper redisMapper,
+            RedisMapper<?> redisMapper,
             RedisJoinConfig redisJoinConfig,
             ResolvedSchema resolvedSchema,
             ReadableConfig readableConfig) {
@@ -96,7 +98,10 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
         this.redisCommand = redisCommandDescription.getRedisCommand();
 
         this.dataTypes = resolvedSchema.getColumnDataTypes();
-        // todo
+        this.validate();
+    }
+
+    private void validate() {
         boolean hasArrayType = false;
         for (DataType dataType : this.dataTypes) {
             if (dataType.getChildren().isEmpty()) continue;
@@ -115,206 +120,7 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
     public void eval(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys)
             throws Exception {
 
-        // when use cache.
-        if (cache != null) {
-            GenericRowData genericRowData = null;
-            switch (redisCommand.getJoinCommand()) {
-                case GET:
-                    genericRowData = (GenericRowData) cache.getIfPresent(buildCacheKey(keys[0]));
-                    break;
-                case HGET:
-                    if (loadAll) {
-                        Map<String, String> map =
-                                (Map<String, String>) cache.getIfPresent(String.valueOf(keys[0]));
-                        if (map != null) {
-                            resultFuture.complete(
-                                    Collections.singleton(
-                                            RedisResultWrapper.createRowDataForHash(
-                                                    keys,
-                                                    map.get(String.valueOf(keys[1])),
-                                                    redisValueDataStructure,
-                                                    dataTypes)));
-                            return;
-                        }
-                    } else {
-                        String key =
-                                new StringBuilder(String.valueOf(keys[0]))
-                                        .append(CACHE_SEPARATOR)
-                                        .append(String.valueOf(keys[1]))
-                                        .toString();
-                        genericRowData = (GenericRowData) cache.getIfPresent(key);
-                    }
-                    break;
-                case ZSCORE: {
-                    String key =
-                            new StringBuilder(String.valueOf(keys[0]))
-                                    .append(CACHE_SEPARATOR)
-                                    .append(String.valueOf(keys[1]))
-                                    .toString();
-                    genericRowData = (GenericRowData) cache.getIfPresent(key);
-                    break;
-                }
-                default:
-            }
-
-            // when cache is not null.
-            if (genericRowData != null) {
-                resultFuture.complete(Collections.singleton(genericRowData));
-                return;
-            }
-        }
-
-        // It will try many times which less than {@code maxRetryTimes} until execute success.
-        for (int i = 0; i <= maxRetryTimes; i++) {
-            try {
-                query(resultFuture, keys);
-                break;
-            } catch (Exception e) {
-                LOG.error("query redis error, retry times:{}", i, e);
-                if (i >= maxRetryTimes) {
-                    throw new RuntimeException("query redis error ", e);
-                }
-                Thread.sleep(500 * i);
-            }
-        }
-    }
-
-    /**
-     * query redis.
-     *
-     * @param keys
-     * @throws Exception
-     */
-    private void query(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) {
-        switch (redisCommand.getJoinCommand()) {
-            case GET: {
-                if (keys[0] instanceof ArrayData arrayData) {
-                    List<CompletableFuture<String>> futures = IntStream.range(0, arrayData.size())
-                            .boxed()
-                            .map(i -> String.valueOf(arrayData.getString(i)))
-                            .map(k -> this.redisCommandsContainer.get(k)).map(RedisFuture::toCompletableFuture).toList();
-
-                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                            .thenAccept(v -> {
-                                List<String> results = new ArrayList<>();
-                                boolean allNull = true;
-                                for (CompletableFuture<String> future : futures) {
-                                    String result = future.join();
-                                    results.add(result);
-                                    if (result != null) {
-                                        allNull = false;
-                                    }
-                                }
-                                GenericRowData rowData =
-                                        RedisResultWrapper.createRowDataForArray(
-                                                keys,
-                                                results,
-                                                redisValueDataStructure,
-                                                dataTypes);
-                                resultFuture.complete(Collections.singleton(rowData));
-                                if (cache != null && !allNull) {
-                                    cache.put(buildCacheKey(arrayData), rowData);
-                                }
-                            });
-                } else {
-                    this.redisCommandsContainer
-                            .get(String.valueOf(keys[0]))
-                            .thenAccept(
-                                    result -> {
-                                        GenericRowData rowData =
-                                                RedisResultWrapper.createRowDataForString(
-                                                        keys,
-                                                        result,
-                                                        redisValueDataStructure,
-                                                        dataTypes);
-                                        resultFuture.complete(Collections.singleton(rowData));
-                                        if (cache != null && result != null) {
-                                            cache.put(String.valueOf(keys[0]), rowData);
-                                        }
-                                    });
-                }
-                break;
-            }
-            case HGET: {
-                if (loadAll) {
-                    loadAllElementsForMap(resultFuture, keys);
-                    return;
-                }
-
-                this.redisCommandsContainer
-                        .hget(String.valueOf(keys[0]), String.valueOf(keys[1]))
-                        .thenAccept(
-                                result -> {
-                                    GenericRowData rowData =
-                                            RedisResultWrapper.createRowDataForHash(
-                                                    keys,
-                                                    result,
-                                                    redisValueDataStructure,
-                                                    dataTypes);
-                                    resultFuture.complete(Collections.singleton(rowData));
-                                    if (cache != null && result != null) {
-                                        String key =
-                                                new StringBuilder(String.valueOf(keys[0]))
-                                                        .append(CACHE_SEPARATOR)
-                                                        .append(String.valueOf(keys[1]))
-                                                        .toString();
-                                        cache.put(key, rowData);
-                                    }
-                                });
-
-                break;
-            }
-            case ZSCORE: {
-                this.redisCommandsContainer
-                        .zscore(String.valueOf(keys[0]), String.valueOf(keys[1]))
-                        .thenAccept(
-                                result -> {
-                                    GenericRowData rowData =
-                                            RedisResultWrapper.createRowDataForSortedSet(
-                                                    keys, result, dataTypes);
-                                    resultFuture.complete(Collections.singleton(rowData));
-                                    if (cache != null && result != null) {
-                                        String key = keys[0] + CACHE_SEPARATOR + keys[1];
-                                        cache.put(key, rowData);
-                                    }
-                                });
-                break;
-            }
-            default:
-        }
-    }
-
-    private String buildCacheKey(Object obj) {
-        if (obj instanceof ArrayData array) {
-            StringJoiner joiner = new StringJoiner(";");
-            for (int i = 0; i < array.size(); i++) {
-                joiner.add(String.valueOf(array.getString(i)));
-            }
-            return joiner.toString();
-        }
-        return String.valueOf(obj);
-    }
-
-    /**
-     * load all element in memory from map.
-     *
-     * @param keys
-     */
-    private void loadAllElementsForMap(
-            CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) {
-        this.redisCommandsContainer
-                .hgetAll(String.valueOf(keys[0]))
-                .thenAccept(
-                        map -> {
-                            cache.put(String.valueOf(keys[0]), map);
-                            resultFuture.complete(
-                                    Collections.singleton(
-                                            RedisResultWrapper.createRowDataForHash(
-                                                    keys,
-                                                    map.get(String.valueOf(keys[1])),
-                                                    redisValueDataStructure,
-                                                    dataTypes)));
-                        });
+        joinCommandExecutor.eval(resultFuture, keys);
     }
 
     @Override
@@ -356,6 +162,13 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
                         .expireAfterWrite(cacheTtl, TimeUnit.SECONDS)
                         .maximumSize(cacheMaxSize)
                         .build();
+
+        this.joinCommandExecutor = switch (redisCommand.getJoinCommand()) {
+            case GET -> new RedisGetJoinCommandExecutor();
+            case HGET -> new RedisHGetJoinCommandExecutor();
+            case ZSCORE -> new RedisZScoreJoinCommandExecutor();
+            default -> throw new UnsupportedOperationException(("Unsupported join command: " + redisCommand.name()));
+        };
     }
 
     @Override
@@ -368,5 +181,205 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
             cache.cleanUp();
             cache = null;
         }
+    }
+
+    @Nullable
+    @SuppressWarnings("unchecked")
+    public <T> T getCache(String key) {
+        return cache == null
+                ? null
+                : (T) cache.getIfPresent(key);
+    }
+
+    public void retry(Runnable runnable) throws InterruptedException {
+        // It will try many times which less than {@code maxRetryTimes} until execute success.
+        for (int i = 0; i <= maxRetryTimes; i++) {
+            try {
+                runnable.run();
+                break;
+            } catch (Exception e) {
+                LOG.error("query redis error, retry times:{}", i, e);
+                if (i >= maxRetryTimes) {
+                    throw new RuntimeException("query redis error ", e);
+                }
+                Thread.sleep(500L * i);
+            }
+        }
+    }
+
+    public interface RedisJoinCommandExecutor {
+        void eval(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) throws InterruptedException;
+    }
+
+    public class RedisGetJoinCommandExecutor implements RedisJoinCommandExecutor {
+        @Override
+        public void eval(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) throws InterruptedException {
+            // for array data type
+            if (keys[0] instanceof ArrayData array) {
+                Map<String, Integer> missingKeys = new HashMap<>();
+                String[] results = new String[array.size()];
+                for (int i = 0; i < array.size(); i++) {
+                    String key = String.valueOf(array.getString(i));
+                    String val = getCache(key);
+                    results[i] = val;
+                    if (val == null) {
+                        missingKeys.put(key, i);
+                    }
+                }
+                if (missingKeys.isEmpty()) {
+                    triggerFuture(resultFuture, results);
+                } else {
+                    retry(() -> query(resultFuture, missingKeys, results));
+                }
+                return;
+            }
+
+            // for scalar data type
+            String result = getCache(String.valueOf(keys[0]));
+            if (result != null) {
+                triggerFuture(resultFuture, result, keys);
+            } else {
+                retry(() -> query(resultFuture, keys));
+            }
+        }
+
+        private void query(CompletableFuture<Collection<GenericRowData>> resultFuture, Map<String, Integer> missingKeys, String[] results) {
+            List<String> keys = new ArrayList<>(missingKeys.keySet());
+            List<CompletableFuture<String>> futures = keys.stream()
+                    .map(redisCommandsContainer::get)
+                    .map(RedisFuture::toCompletableFuture)
+                    .toList();
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .thenAccept(v -> {
+                        for (int i = 0; i < futures.size(); i++) {
+                            String value = futures.get(i).join();
+                            String key = keys.get(i);
+                            Integer resultIdx = missingKeys.get(key);
+                            results[resultIdx] = value;
+                            if (cache != null && value != null) {
+                                cache.put(key, value);
+                            }
+                        }
+
+                        triggerFuture(resultFuture, results);
+                    });
+        }
+
+        private void query(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) {
+            redisCommandsContainer
+                    .get(String.valueOf(keys[0]))
+                    .thenAccept(
+                            result -> {
+                                triggerFuture(resultFuture, result, keys);
+                                if (cache != null && result != null) {
+                                    cache.put(String.valueOf(keys[0]), result);
+                                }
+                            });
+        }
+
+        private void triggerFuture(CompletableFuture<Collection<GenericRowData>> future, String result, Object... keys) {
+            GenericRowData rowData = RedisResultWrapper.createRowDataForString(keys, result, redisValueDataStructure, dataTypes);
+            future.complete(List.of(rowData));
+        }
+
+        private void triggerFuture(CompletableFuture<Collection<GenericRowData>> future, String[] result) {
+            GenericRowData rowData = RedisResultWrapper.createRowDataForArray(result, redisValueDataStructure, dataTypes);
+            future.complete(Collections.singleton(rowData));
+        }
+
+    }
+
+    public class RedisHGetJoinCommandExecutor implements RedisJoinCommandExecutor {
+        @Override
+        public void eval(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) throws InterruptedException {
+            // load all kv
+            if (loadAll) {
+                Map<String, String> map = getCache(String.valueOf(keys[0]));
+                if (map != null) {
+                    triggerFuture(resultFuture, map.get(String.valueOf(keys[1])), keys);
+                } else {
+                    retry(() -> queryAll(resultFuture, keys));
+                }
+                return;
+            }
+
+            // load single kv
+            String key = keys[0] + CACHE_SEPARATOR + keys[1];
+            String result = getCache(key);
+            if (result != null) {
+                triggerFuture(resultFuture, result, keys);
+            } else {
+                retry(() -> query(resultFuture, keys));
+            }
+        }
+
+        private void queryAll(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) {
+            redisCommandsContainer
+                    .hgetAll(String.valueOf(keys[0]))
+                    .thenAccept(
+                            map -> {
+                                if (map == null) {
+                                    triggerFuture(resultFuture, null, keys);
+                                    return;
+                                }
+                                triggerFuture(resultFuture, map.get(String.valueOf(keys[1])), keys);
+                                if (cache != null) {
+                                    cache.put(String.valueOf(keys[0]), map);
+                                }
+                            });
+        }
+
+        private void query(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) {
+            redisCommandsContainer
+                    .hget(String.valueOf(keys[0]), String.valueOf(keys[1]))
+                    .thenAccept(
+                            result -> {
+                                triggerFuture(resultFuture, result, keys);
+                                if (cache != null && result != null) {
+                                    String key = keys[0] + CACHE_SEPARATOR + keys[1];
+                                    cache.put(key, result);
+                                }
+                            });
+
+        }
+
+        private void triggerFuture(CompletableFuture<Collection<GenericRowData>> future, String result, Object... keys) {
+            GenericRowData rowData = RedisResultWrapper.createRowDataForHash(keys, result, redisValueDataStructure, dataTypes);
+            future.complete(List.of(rowData));
+        }
+    }
+
+
+    public class RedisZScoreJoinCommandExecutor implements RedisJoinCommandExecutor {
+        @Override
+        public void eval(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) throws InterruptedException {
+            String key = keys[0] + CACHE_SEPARATOR + keys[1];
+            Double result = getCache(key);
+            if (result != null) {
+                triggerFuture(resultFuture, result, keys);
+            } else {
+                retry(() -> query(resultFuture, keys));
+            }
+        }
+
+        private void query(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) {
+            redisCommandsContainer
+                    .zscore(String.valueOf(keys[0]), String.valueOf(keys[1]))
+                    .thenAccept(
+                            result -> {
+                                triggerFuture(resultFuture, result, keys);
+                                if (cache != null && result != null) {
+                                    String key = keys[0] + CACHE_SEPARATOR + keys[1];
+                                    cache.put(key, result);
+                                }
+                            });
+        }
+
+        private void triggerFuture(CompletableFuture<Collection<GenericRowData>> future, Double result, Object... keys) {
+            GenericRowData rowData = RedisResultWrapper.createRowDataForSortedSet(keys, result, dataTypes);
+            future.complete(List.of(rowData));
+        }
+
     }
 }

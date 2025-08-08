@@ -23,11 +23,14 @@ import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
 import org.apache.flink.api.java.tuple.Tuple;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.runtime.client.JobCancellationException;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.test.junit5.MiniClusterExtension;
@@ -45,10 +48,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -155,5 +155,56 @@ public class TestRedisConfigBaseV2 {
         }
 
         return properties;
+    }
+
+    @SuppressWarnings("deprecation")
+    public static class ListSourceFunction implements SourceFunction<String> {
+        private final List<Tuple2<Long, String>> data;
+        private final long defaultInterval;
+        private final long watermarkMs;
+        private final float clockScale;
+
+        private volatile boolean running = true;
+
+        public ListSourceFunction(List<Tuple2<Long, String>> data, Duration defaultInterval, Duration watermarkDelay) {
+            this(data, defaultInterval, watermarkDelay, 1.0f);
+        }
+
+        public ListSourceFunction(List<Tuple2<Long, String>> data, Duration defaultInterval, Duration watermarkDelay, float clockScale) {
+            this.data = data;
+            this.defaultInterval = defaultInterval.toMillis();
+            this.watermarkMs = watermarkDelay.toMillis();
+            this.clockScale = clockScale;
+        }
+
+        @Override
+        public void run(SourceContext<String> ctx) throws Exception {
+            Long prevTs = null;
+
+            Iterator<Tuple2<Long, String>> iterator = data.iterator();
+            while (running && iterator.hasNext()) {
+                var element = iterator.next();
+                long curTs = element.f0;
+
+                // sleep current element interval based on previous timestamp
+                if (prevTs != null) {
+                    long delta = curTs - prevTs;
+                    long sleepMs = delta > 0 ? delta : defaultInterval;
+                    TimeUnit.MILLISECONDS.sleep((long) (sleepMs * clockScale));
+                }
+
+                //long ts = curTs != 0 ? curTs : System.currentTimeMillis();
+                long ts = System.currentTimeMillis();
+                ctx.collectWithTimestamp(element.f1, ts);
+                ctx.emitWatermark(new Watermark(ts - watermarkMs));
+
+                prevTs = curTs;
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
     }
 }

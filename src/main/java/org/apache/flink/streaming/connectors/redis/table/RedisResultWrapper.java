@@ -28,6 +28,7 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.flink.streaming.connectors.redis.table.RedisDynamicTableFactory.CACHE_SEPARATOR;
@@ -67,29 +68,16 @@ public class RedisResultWrapper {
 
     /// create row data for `array<string>`.
     public static GenericRowData createRowDataForArray(
-            Object[] keys,
-            List<String> value,
+            String[] value,
             RedisValueDataStructure redisValueDataStructure,
             List<DataType> dataTypes) {
         if (redisValueDataStructure == RedisValueDataStructure.column) {
-            GenericRowData genericRowData = new GenericRowData(2);
-            if (value == null) {
-                genericRowData.setField(0, null);
-                return genericRowData;
-            }
-            genericRowData.setField(
-                    0,
-                    RedisRowConverter.dataTypeFromString(
-                            dataTypes.get(0).getLogicalType(), String.valueOf(keys[0])));
-
-            // todo Array for int/long/... type
-            genericRowData.setField(1, new GenericArrayData(value.stream().map(BinaryStringData::fromString).toArray()));
-            return genericRowData;
+            throw new UnsupportedOperationException("Array<String> only support row data structure.");
         }
 
         // todo Array for int/long/... type
         GenericRowData genericRowData = new GenericRowData(dataTypes.size());
-        genericRowData.setField(0, new GenericArrayData(value.stream().map(BinaryStringData::fromString).toArray()));
+        genericRowData.setField(0, new GenericArrayData(Arrays.stream(value).map(BinaryStringData::fromString).toArray()));
         return genericRowData;
     }
 
