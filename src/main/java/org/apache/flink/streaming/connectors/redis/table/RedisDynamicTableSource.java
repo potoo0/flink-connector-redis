@@ -45,7 +45,7 @@ public class RedisDynamicTableSource implements ScanTableSource, LookupTableSour
     private Map<String, String> properties;
     private ResolvedSchema resolvedSchema;
     private ReadableConfig config;
-    private RedisMapper redisMapper;
+    private RedisMapper<?> redisMapper;
     private RedisJoinConfig redisJoinConfig;
 
     private RedisCommand redisCommand;
@@ -61,10 +61,7 @@ public class RedisDynamicTableSource implements ScanTableSource, LookupTableSour
         this.resolvedSchema = resolvedSchema;
         Preconditions.checkNotNull(resolvedSchema, "resolvedSchema should not be null");
         this.config = config;
-        redisMapper = new RowRedisQueryMapper(redisCommand);
-        this.properties = properties;
-        this.resolvedSchema = resolvedSchema;
-        this.config = config;
+        redisMapper = new RowRedisQueryMapper<>(redisCommand);
         flinkConfigBase =
                 RedisHandlerServices.findRedisHandler(FlinkConfigHandler.class, properties)
                         .createFlinkConfig(config);
