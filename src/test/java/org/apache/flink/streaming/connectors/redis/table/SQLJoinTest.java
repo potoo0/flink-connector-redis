@@ -20,7 +20,7 @@ package org.apache.flink.streaming.connectors.redis.table;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.redis.command.RedisCommand;
-import org.apache.flink.streaming.connectors.redis.table.base.TestRedisConfigBase;
+import org.apache.flink.streaming.connectors.redis.table.base.TestRedisConfigBaseV2;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
@@ -33,7 +33,7 @@ import static org.apache.flink.streaming.connectors.redis.config.RedisValidator.
  * @author Jeff Zou
  * @date 2024/3/19 17:07
  */
-public class SQLJoinTest extends TestRedisConfigBase {
+public class SQLJoinTest extends TestRedisConfigBaseV2 {
 
     public static final String[] TEST_KEYS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "test"};
 
@@ -55,14 +55,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
                         + ")";
         tEnv.executeSql(source);
         String ddl =
-                "create table join_redis(username VARCHAR, passport varchar) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table join_redis(username VARCHAR, passport varchar) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.GET
@@ -86,14 +81,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
         singleRedisCommands.del("1", "2", "3", "1_1", "2_2");
         // init data in redis
         String ddl =
-                "create table sink_redis(uid VARCHAR, score double, score2 double ) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table sink_redis(uid VARCHAR, score double, score2 double ) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.SET
@@ -113,14 +103,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
 
         // create result table
         ddl =
-                "create table result_table(uid VARCHAR, score double) with ('connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table result_table(uid VARCHAR, score double) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.SET
@@ -148,14 +133,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
         singleRedisCommands.del("test_hash");
         // init data in redis
         String ddl =
-                "create table sink_redis(uid VARCHAR, level varchar, score double, score2 double ) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table sink_redis(uid VARCHAR, level varchar, score double, score2 double ) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.HSET
@@ -174,14 +154,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
         tEnv.executeSql(ddl);
         // create result table
         ddl =
-                "create table result_table(uid VARCHAR, level VARCHAR, score double) with ('connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table result_table(uid VARCHAR, level VARCHAR, score double) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.HSET
@@ -211,14 +186,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
         singleRedisCommands.hset("test_hash", "1", "test");
         singleRedisCommands.hset("test_hash", "5", "test");
         String dim =
-                "create table dim_table(name varchar, level varchar, age varchar) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table dim_table(name varchar, level varchar, age varchar) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.HGET
@@ -232,14 +202,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
                         + ")";
 
         String sink =
-                "create table sink_table(username varchar, level varchar,age varchar) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table sink_table(username varchar, level varchar,age varchar) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.HSET
@@ -273,14 +238,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
         singleRedisCommands.hset("test_hash", "1", "test");
         singleRedisCommands.hset("test_hash", "5", "test");
         String dim =
-                "create table dim_table(name varchar, level varchar, age varchar) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table dim_table(name varchar, level varchar, age varchar) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.HGET
@@ -294,14 +254,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
                         + ")";
 
         String sink =
-                "create table sink_table(username varchar, level varchar,age varchar) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table sink_table(username varchar, level varchar,age varchar) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.HSET
@@ -331,14 +286,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
         singleRedisCommands.del("10", "11", "12", "13", "14", "15");
         singleRedisCommands.set("10", "1800000");
         String dim =
-                "create table dim_table(name varchar, login_time time(3) ) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table dim_table(name varchar, login_time time(3) ) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.GET
@@ -352,14 +302,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
                         + ")";
 
         String sink =
-                "create table sink_table(username varchar, level varchar,login_time time(3)) with  ('connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single','password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table sink_table(username varchar, level varchar,login_time time(3)) with  ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.HSET
@@ -388,14 +333,9 @@ public class SQLJoinTest extends TestRedisConfigBase {
         singleRedisCommands.del("test_sorted_set");
         singleRedisCommands.zadd("test_sorted_set", 1d, "10");
         String join =
-                "create table redis_table(username VARCHAR, age double, passport VARCHAR) with ( 'connector'='redis', "
-                        + "'host'='"
-                        + REDIS_HOST
-                        + "','port'='"
-                        + REDIS_PORT
-                        + "', 'redis-mode'='single', 'password'='"
-                        + REDIS_PASSWORD
-                        + "','"
+                "create table redis_table(username VARCHAR, age double, passport VARCHAR) with ( "
+                        + getRedisCommonOptions()
+                        + ", '"
                         + REDIS_COMMAND
                         + "'='"
                         + RedisCommand.ZADD

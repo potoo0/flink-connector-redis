@@ -22,6 +22,7 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
+import org.apache.commons.text.StringSubstitutor;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
@@ -31,6 +32,7 @@ import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.streaming.connectors.redis.command.RedisCommand;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.test.junit5.MiniClusterExtension;
@@ -79,6 +81,7 @@ public class TestRedisConfigBaseV2 {
     @BeforeAll
     public static void init() {
         globalProps = loadProperties("local.properties");
+        globalProps.setProperty("__redis.common", getRedisCommonOptions());
         Configuration configuration = Configuration.fromMap(globalProps.entrySet().stream()
                 .collect(Collectors.toMap(e -> e.getKey().toString(), e -> e.getValue().toString())));
         env = StreamExecutionEnvironment.getExecutionEnvironment(configuration);
@@ -100,6 +103,18 @@ public class TestRedisConfigBaseV2 {
     public static void stopSingle() {
         singleConnect.close();
         redisClient.shutdown();
+    }
+
+    public static String getRedisCommonOptions() {
+        String rawTmpl = """
+                    'connector' = 'redis',
+                    'host' = '${redis.host}',
+                    'port' = '${redis.port}',
+                    'database' = '${redis.database}',
+                    'redis-mode' = '${redis.redis-mode}',
+                    'password' = '${redis.password}'
+                """;
+        return StringSubstitutor.replace(rawTmpl, globalProps);
     }
 
     public static Tuple toTuple(List<String> fieldNames, Row row) {

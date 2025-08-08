@@ -70,12 +70,7 @@ public class SQLJoinOnArrayTest extends TestRedisConfigBaseV2 {
                 create table dim_redis1 (
                     data string
                 ) with (
-                    'connector' = 'redis',
-                    'host' = '${redis.host}',
-                    'port' = '${redis.port}',
-                    'database' = '${redis.database}',
-                    'redis-mode' = '${redis.redis-mode}',
-                    'password' = '${redis.password}',
+                    ${__redis.common},
                     'command' = 'get',
                     'value.data.structure' = 'row',
                     'maxIdle' = '2',
@@ -91,12 +86,7 @@ public class SQLJoinOnArrayTest extends TestRedisConfigBaseV2 {
                 create table dim_redis2 (
                     data array<string>
                 ) with (
-                    'connector' = 'redis',
-                    'host' = '${redis.host}',
-                    'port' = '${redis.port}',
-                    'database' = '${redis.database}',
-                    'redis-mode' = '${redis.redis-mode}',
-                    'password' = '${redis.password}',
+                    ${__redis.common},
                     'command' = 'get',
                     'value.data.structure' = 'row',
                     'maxIdle' = '2',

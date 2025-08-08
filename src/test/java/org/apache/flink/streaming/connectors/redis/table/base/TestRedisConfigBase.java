@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.redis.table.base;
 
+import org.apache.flink.configuration.Configuration;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
@@ -27,6 +28,11 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
+
+import java.util.Properties;
+import java.util.stream.Collectors;
+
+import static org.apache.flink.streaming.connectors.redis.table.base.TestRedisConfigBaseV2.loadProperties;
 
 /**
  * @Author: Jeff Zou @Date: 2022/10/14 10:07
