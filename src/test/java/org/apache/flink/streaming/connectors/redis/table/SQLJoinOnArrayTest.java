@@ -24,48 +24,80 @@ import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.connectors.redis.table.base.TestRedisConfigBaseV2;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.types.Row;
 import org.assertj.core.api.Assertions;
+import org.assertj.core.api.recursive.comparison.RecursiveComparisonConfiguration;
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
 import java.time.Duration;
 import java.util.List;
 
 public class SQLJoinOnArrayTest extends TestRedisConfigBaseV2 {
 
     @Test
+    void testArrayInt() {
+        List<Tuple2<Long, String>> snWithTs = List.of(
+                Tuple2.of(0L, "0"),
+                Tuple2.of(100L, "1"),
+                Tuple2.of(200L, "2"),
+                Tuple2.of(300L, "0"),
+                Tuple2.of(400L, "1"));
+        initSrc(null, snWithTs);
+        tEnv.executeSql(StringSubstitutor.replace("""
+                create table dim_redis2 (
+                    data array<BIGINT>
+                ) with (
+                    ${__redis.common},
+                    'command' = 'get',
+                    'value.data.structure' = 'row',
+                    'maxIdle' = '2',
+                    'minIdle' = '1',
+                    'lookup.cache.max-rows' = '200',
+                    'lookup.cache.ttl' = '100',
+                    'max.retries' = '3',
+                    'sink.parallelism' = '1'
+                )
+                """, globalProps));
+        TableResult tableResult = tEnv.executeSql("""
+                select t.sn
+                    , dim_device2.data as d2
+                    //, ARRAY_MAX(dim_device2.data) as d2_max
+                from src as t
+                
+                LEFT JOIN dim_redis2 for system_time as of t.proctime as dim_device2
+                    ON dim_device2.data = ARRAY[CAST(t.sn AS BIGINT), CAST(CONCAT(t.sn, t.sn) AS BIGINT)]
+                """);
+        List<Row> rows = collect(tableResult, Duration.ofSeconds(10));
+        List<String> fieldNames = List.of("sn", "d2");
+        List<Tuple> expected = List.of(
+                Tuple2.of("0", new Long[]{null, null}),
+                Tuple2.of("1", new Long[]{1L, 1L}),
+                Tuple2.of("2", new Long[]{null, 2L}),
+                Tuple2.of("0", new Long[]{null, null}),
+                Tuple2.of("1", new Long[]{1L, 1L})
+        );
+
+        Assertions.assertThat(rows)
+                .extracting(r -> TestRedisConfigBaseV2.toTuple(fieldNames, r))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactlyElementsOf(expected);
+    }
+
+    @Test
     void testGet() {
-        SetArgs setArgs = SetArgs.Builder.ex(Duration.ofMinutes(10));
-        singleRedisCommands.set("test:1", "1", SetArgs.Builder.ex(Duration.ofSeconds(5)));
-        singleRedisCommands.set("test:11", "1", SetArgs.Builder.ex(Duration.ofSeconds(5)));
-        singleRedisCommands.set("test:22", "2", setArgs);
-        List<Tuple2<Long, String>> snList = List.of(
+        List<Tuple2<Long, String>> snWithTs = List.of(
                 Tuple2.of(0L, "0"),
                 Tuple2.of(1000L, "1"),
                 Tuple2.of(2000L, "2"),
                 Tuple2.of(3000L, "0"),
                 Tuple2.of(10000L, "1"));
-        ListSourceFunction sourceFunc = new ListSourceFunction(snList, Duration.ofSeconds(0), Duration.ZERO);
-        @SuppressWarnings("deprecation")
-        DataStream<Row> dataStream = env.addSource(sourceFunc)
-                .map((MapFunction<String, Row>) s -> {
-                    Row row = Row.withNames();
-                    row.setField("sn", s);
-                    return row;
-                })
-                .returns(Types.ROW_NAMED(new String[]{"sn"}, Types.STRING));
-        Schema schema = Schema.newBuilder()
-                .column("sn", "STRING")
-                .columnByExpression("proctime", "PROCTIME()")
-                .build();
-        tEnv.createTemporaryView("src", dataStream, schema);
+        initSrc("test", snWithTs);
         tEnv.executeSql(StringSubstitutor.replace("""
                 create table dim_redis1 (
                     data string
@@ -127,4 +159,29 @@ public class SQLJoinOnArrayTest extends TestRedisConfigBaseV2 {
                 .containsExactlyElementsOf(expected);
     }
 
+    /// redis:
+    /// - keyPrefix:1 -> 1, ttl=5s
+    /// - keyPrefix:11 -> 1, ttl=5s
+    /// - keyPrefix:22 -> 2, ttl=10m
+    void initSrc(@Nullable String keyPrefix, List<Tuple2<Long, String>> tableData) {
+        SetArgs setArgs = SetArgs.Builder.ex(Duration.ofMinutes(10));
+        keyPrefix = keyPrefix == null ? "" : (keyPrefix + ":");
+        singleRedisCommands.set(keyPrefix + "1", "1", SetArgs.Builder.ex(Duration.ofSeconds(5)));
+        singleRedisCommands.set(keyPrefix + "11", "1", SetArgs.Builder.ex(Duration.ofSeconds(5)));
+        singleRedisCommands.set(keyPrefix + "22", "2", setArgs);
+        ListSourceFunction sourceFunc = new ListSourceFunction(tableData, Duration.ofSeconds(0), Duration.ZERO);
+        @SuppressWarnings("deprecation")
+        DataStream<Row> dataStream = env.addSource(sourceFunc)
+                .map((MapFunction<String, Row>) s -> {
+                    Row row = Row.withNames();
+                    row.setField("sn", s);
+                    return row;
+                })
+                .returns(Types.ROW_NAMED(new String[]{"sn"}, Types.STRING));
+        Schema schema = Schema.newBuilder()
+                .column("sn", "STRING")
+                .columnByExpression("proctime", "PROCTIME()")
+                .build();
+        tEnv.createTemporaryView("src", dataStream, schema);
+    }
 }

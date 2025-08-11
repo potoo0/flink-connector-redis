@@ -20,13 +20,10 @@ package org.apache.flink.streaming.connectors.redis.table;
 
 import org.apache.flink.streaming.connectors.redis.config.RedisValueDataStructure;
 import org.apache.flink.streaming.connectors.redis.converter.RedisRowConverter;
-import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.binary.BinaryStringData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
 import java.util.Arrays;
 import java.util.List;
@@ -75,9 +72,17 @@ public class RedisResultWrapper {
             throw new UnsupportedOperationException("Array<String> only support row data structure.");
         }
 
-        // todo Array for int/long/... type
+        // only support `value.data.structure = row` and single field, validated by RedisLookupFunction
         GenericRowData genericRowData = new GenericRowData(dataTypes.size());
-        genericRowData.setField(0, new GenericArrayData(Arrays.stream(value).map(BinaryStringData::fromString).toArray()));
+        DataType arrayDataType = dataTypes.get(0);
+        LogicalType elementType = arrayDataType.getChildren().get(0).getLogicalType();
+        Object[] arrayData = new Object[value.length];
+        for (int i = 0; i < value.length; i++) {
+            arrayData[i] = value[i] != null
+                    ? RedisRowConverter.dataTypeFromString(elementType, value[i])
+                    : null;
+        }
+        genericRowData.setField(0, new GenericArrayData(arrayData));
         return genericRowData;
     }
 

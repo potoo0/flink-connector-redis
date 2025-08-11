@@ -41,6 +41,7 @@ import org.apache.flink.table.functions.AsyncTableFunction;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.DoubleType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.Preconditions;
@@ -102,18 +103,10 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
     }
 
     private void validate() {
-        boolean hasArrayType = false;
-        for (DataType dataType : this.dataTypes) {
-            if (dataType.getChildren().isEmpty()) continue;
-            hasArrayType = true;
-            if (!RedisValueDataStructure.row.equals(this.redisValueDataStructure)
-                    || dataType.getChildren().size() != 1
-                    || !LogicalTypeRoot.VARCHAR.equals(dataType.getChildren().get(0).getLogicalType().getTypeRoot())) {
-                throw new FlinkRuntimeException("Constructured Data Type only support Array<String> and `value.data.structure` must be row! eg: `create table dim_redis ( data Array<String> ) with ( ... )`");
-            }
-        }
-        if (hasArrayType && this.dataTypes.size() > 1) {
-            throw new FlinkRuntimeException("Array only working with single field! eg: `create table dim_redis ( data Array<String> ) with ( ... )`");
+        boolean hasArrayType = this.dataTypes.stream().anyMatch(t -> LogicalTypeRoot.ARRAY.equals(t.getLogicalType().getTypeRoot()));
+        if (hasArrayType && (this.dataTypes.size() > 1 || !RedisValueDataStructure.row.equals(this.redisValueDataStructure))) {
+            throw new FlinkRuntimeException("Array Data Type only working with single field and `'value.data.structure' = 'row'`!" +
+                    " eg: `create table dim_redis ( data Array<String> ) with ( ..., 'value.data.structure' = 'row' )`");
         }
     }
 
@@ -212,6 +205,18 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
     }
 
     public class RedisGetJoinCommandExecutor implements RedisJoinCommandExecutor {
+        private final ArrayData.ElementGetter arrayElementGetter;
+
+        public RedisGetJoinCommandExecutor () {
+            // only support `value.data.structure = row` and single field, validated by RedisLookupFunction
+            arrayElementGetter = dataTypes.stream()
+                    .filter(t -> LogicalTypeRoot.ARRAY.equals(t.getLogicalType().getTypeRoot()))
+                    .map(t -> t.getChildren().get(0).getLogicalType())
+                    .map(ArrayData::createElementGetter)
+                    .findFirst() // only support single array field
+                    .orElse(null);
+        }
+
         @Override
         public void eval(CompletableFuture<Collection<GenericRowData>> resultFuture, Object... keys) throws InterruptedException {
             // for array data type
@@ -219,7 +224,7 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
                 Map<String, Integer> missingKeys = new HashMap<>();
                 String[] results = new String[array.size()];
                 for (int i = 0; i < array.size(); i++) {
-                    String key = String.valueOf(array.getString(i));
+                    String key = String.valueOf(arrayElementGetter.getElementOrNull(array, i));
                     String val = getCache(key);
                     results[i] = val;
                     if (val == null) {
@@ -261,7 +266,6 @@ public class RedisLookupFunction extends AsyncTableFunction<RowData> {
                                 cache.put(key, value);
                             }
                         }
-
                         triggerFuture(resultFuture, results);
                     });
         }
